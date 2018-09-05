@@ -1,0 +1,25 @@
+# Change to true for Disqus comments
+disqus:
+  comments: false
+  disqus_shortname: 'https-lenpaul-github-io-lagrange'
+
+google-ID: 'UA-112060364-1'
+
+menu:
+- {name: 'About', path: 'menu', url: 'about.html'}
+- {name: 'Contact', path: 'menu', url: 'contact.html'}
+
+# Available social icons are powered by Font Awesome, so you can use any icon that they offer
+social:
+- {icon: 'github', link: 'https://www.github.com/johngao2'}
+- {icon: 'linkedin', link: 'https://www.linkedin.com/in/john-gao/'}
+- {icon: 'envelope', link: 'mailto:gaojohn23@gmail.com'}
+
+# Customize site text
+pagination:
+  next_page: 'Newer'
+  previous_page: 'Older'
+  
+related_posts: 'Related posts:'
+  
+post_date_prefix: 'Written on'
