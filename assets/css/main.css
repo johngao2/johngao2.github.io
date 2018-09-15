@@ -36,10 +36,13 @@ body {
 }
 
 h1{
-  font-size: 2rem;
+  font-size: 3rem;
+  font-family: "Quattrocento Sans", sans-serif;
+  color: black;
 }
 
 h1 a {
+  font-size: 2rem;
   text-decoration: none;
   color: #1B5726;
 }
@@ -48,18 +51,18 @@ h1 a:hover {
   color:#2D8C3F;
 }
 
-h1, h2, h3, h4, h5, h6 {
+h2, h3, h4, h5, h6 {
   font-family: "Quattrocento Sans", sans-serif;
-  color: #333;
+  color: #222;
 }
 
 a {
-  text-decoration: underline;
-  color: #333;
+  text-decoration: none;
+  color: #277A37;
 }
 
 a:hover {
-  color: black;
+  color: #34A349;
   border-bottom: none;
 }
 
@@ -77,10 +80,6 @@ blockquote {
   line-height: 1.5;
 }
 
-hr {
-  border-top: 1px solid #ccc;
-}
-
 /*
   Site container
 */
@@ -88,8 +87,8 @@ hr {
 .container {
   margin-left: auto;
   margin-right: auto;
-  width: 700px;
-  border-top: 
+  width: 900px;
+  border-top:
   4px solid #1B5726;
 }
 
@@ -151,14 +150,14 @@ hr {
 }
 
 .posts {
-  margin-bottom: 2rem;
+  margin-bottom: 4rem;
   padding: 0px;
   list-style: none;
 }
 
 .post-date {
   display: block;
-  margin-top:3px;
+  margin-top:9px;
   margin-bottom: 1rem;
   color: #9a9a9a;
   font-family: 'Quattrocento Sans', sans-serif;
@@ -220,6 +219,7 @@ hr {
 */
 
 .footer {
+  font-size: 1.0rem;
   color: #999;
   text-align: center;
   margin: 2rem;
@@ -227,7 +227,7 @@ hr {
 
 .footer a {
   color: #999;
-  padding: 10px;
+  padding: 3px;
   text-decoration: none;
 }
 
