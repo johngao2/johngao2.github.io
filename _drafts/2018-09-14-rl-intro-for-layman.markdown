@@ -21,8 +21,9 @@ In this post, I'll go over some of the basic fundamental theory behind reinforce
 Reinforcement learning has exploded in popularity in the past few years. Now it receives a staggering amount attention from both industry and academia, whereas 20 years ago it was a niche research field. I won't get much into the history of RL here, but it's actually super interesting, so you should read about it [here](http://incompleteideas.net/book/ebook/node12.html){:target="_ blank"}. Usually when an idea suddenly gets a large amount of traction, a lot of information gets lost in the process, which results in misinformation. As a result, theres still a lot of confusion about what constitutes RL. This is why I wanted to take this first section to address these misconceptions, and provide a unified definition for reinforcement learning.
 
 Reinforcement learning is not just a single technique; it's actually a class of algorithms. Therefore, to define reinforcement learning, we would need to find something that binds this class of algorithms together. Here are some things that **fail** to define RL, but are commonly given as definitions:
+
 1. **RL techniques are techniques that take delayed rewards into account.**  
-    Although most reinforcement learning techniques do this, 
+    Although most reinforcement learning techniques do this,
 2. dssds
 3. sadas
 
