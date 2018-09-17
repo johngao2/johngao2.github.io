@@ -13,9 +13,8 @@ title: Home
     <a href="{{ site.github.url }}{{ post.url }}"><img src="{{ site.github.url }}/assets/img/{{ post.image }}"></a>
   </div>
   {% endif %}
-  <p>
-    {{ post.excerpt }}
-    <span class="post-date"> {{ post.date | date_to_string }}</span>
-  </p>
+  <p class='excerpt'>{{ post.excerpt }}</p>
+  <p class='excerpt'></p>
+  <span class="post-date"> {{ post.date | date_to_string }}</span>
 </div>
 {% endfor %}

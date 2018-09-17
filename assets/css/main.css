@@ -17,6 +17,11 @@
   Base
 */
 
+p.excerpt {
+    margin-top:-15px;
+    margin-bottom: -15px;
+}
+
 body {
   font-family: "PT Serif", Georgia, "Times New Roman", serif;
   font-size: 18px;
@@ -36,9 +41,10 @@ body {
 }
 
 h1{
-  font-size: 3rem;
+  font-size: 2rem;
   font-family: "Quattrocento Sans", sans-serif;
   color: black;
+  line-height: 2.2rem;
 }
 
 h1 a {
@@ -51,6 +57,23 @@ h1 a:hover {
   color:#2D8C3F;
 }
 
+h2 {
+  margin-bottom: -14px;
+}
+
+h2 a{
+  margin-bottom: -14px;
+  color:#1B5726;
+}
+
+h2 a:hover {
+  color:#2D8C3F;
+}
+
+h3 {
+  margin-bottom: -17px
+}
+
 h2, h3, h4, h5, h6 {
   font-family: "Quattrocento Sans", sans-serif;
   color: #222;
@@ -58,11 +81,11 @@ h2, h3, h4, h5, h6 {
 
 a {
   text-decoration: none;
-  color: #277A37;
+  color: #2F9141;
 }
 
 a:hover {
-  color: #34A349;
+  color: #37AB4D;
   border-bottom: none;
 }
 
@@ -87,7 +110,7 @@ blockquote {
 .container {
   margin-left: auto;
   margin-right: auto;
-  width: 900px;
+  width: 780px;
   border-top:
   4px solid #1B5726;
 }
@@ -146,18 +169,18 @@ blockquote {
 */
 
 .post-container {
-  margin-bottom: 4rem;
+  margin-bottom: 8rem;
 }
 
 .posts {
-  margin-bottom: 4rem;
+  margin-bottom: 2rem;
   padding: 0px;
   list-style: none;
 }
 
 .post-date {
   display: block;
-  margin-top:9px;
+  margin-top:-20px;
   margin-bottom: 1rem;
   color: #9a9a9a;
   font-family: 'Quattrocento Sans', sans-serif;
