@@ -1,3 +1,3 @@
-# My blog
+# My personal blog
 
-Based on the [Lagrange](https://github.com/LeNPaul/Lagrange) theme, though I made quite a few changes.
+Based on the [Lagrange](https://github.com/LeNPaul/Lagrange) theme by LeNPaul, though I made quite a few changes.
