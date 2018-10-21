@@ -369,18 +369,21 @@ pre code {
 */
 
 table {
-  border-collapse: collapse;
-  margin-bottom: 30px;
-  width: 100%;
+  max-width: 100%;
+  border-top: 2px solid #1B5726;
+  border-bottom: 2px solid #1B5726;
+  margin: 20px auto;
+  font-size: 90%;
+  line-height: 20px;
+  border-spacing: 5px;
 }
-
-table, th, td {
-  border: 1px solid black;
-}
-
-th, td {
-  padding: 15px;
+table th, table td {
+  padding: 2px 6px;
   text-align: left;
+}
+table th {
+  text-align: left;
+  border-bottom: 1px solid #EBEBEB;
 }
 
 /*
