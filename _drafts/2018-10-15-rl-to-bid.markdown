@@ -27,8 +27,8 @@ There are multiple ways that a website can charge companies for impressions. One
 
 The process starts off when a user reaches a webpage. While the page is loading, the following events happen in sequence:
 1. The website sends impression info (e.g. user cookie ID, location, time, domain, URL, etc) to a central auction exchange as a **bid request**
-2. Bots from various companies will receive this bid request, and look at the info.
-3. Each bot will decide on a bid price, and submit those prices. Each bot will also submit the ad itself that it wants to broadcast, should it win the auction.
+2. Bots/agents from various companies will receive this bid request, and look at the info.
+3. Each bot will decide on a bid price, and submit those prices. Each bot will also submit the ad that it wishes to broadcast, should it win the auction.
 4. The highest bidder will have their ad displayed on the webpage.
 
 Keep in mind that this process happens in the span of milliseconds, and is repeated every time someone visits a page. To make this process clearer, here's a gif outlining the process for a hypothetical ad.
