@@ -298,6 +298,6 @@ See you then!
 
 ---
 
-If you notice any mistakes, have any feedback, or would just like to discuss this topic, send me a message!  
+*As always, if you notice any mistakes, have any feedback, or would just like to discuss this topic, send me a message at gaojohn23@gmail.com!*
 
 **Part 2 is currently being written; stay tuned!**
