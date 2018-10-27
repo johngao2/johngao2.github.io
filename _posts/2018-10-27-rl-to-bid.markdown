@@ -233,7 +233,7 @@ The agent also needs to predict future rewards for impressions that it hasn't ob
 ## MDP Recap
 
 Just a quick recap of what we have to work with:  
-**State**: $$(t, b, \pmb{x})$$ - The remaining ad volume, budget, and feature vector
+**State**: $$(t, b, \pmb{x})$$ - The remaining ad volume, budget, and feature vector  
 **Action**: $$a_{(t, b, \pmb{x}_t)}$$ - The amount to bid for a particular impression  
 **State transition**:  
 $$
