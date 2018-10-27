@@ -1,0 +1,555 @@
+---
+layout: post
+title: "Optimal Real-time Ad Bidding with Reinforcement Learning"
+author: "John Gao"
+categories: blog
+tags: [RL, RTB]
+---
+
+In this **long and technical** post, I'll be summarizing a recent paper which applies reinforcement learning **in industry** to train an agent which bids on display ads in real time. I'll cover the process of formulating the real-time problem into an MDP, solving that MDP with dynamic programming, and scaling up the algorithm for bigger datasets using deep neural nets. I'll also be discussing the experiments & results of the paper.
+
+* The generated Toc will be an ordered list
+{:toc}
+
+# Introduction & Topic Motivation
+
+>"The excitement and PR hype behind reinforcement learning is a bit disproportionate relative to the economic value it's creating today" - Andrew Ng
+
+Reinforcement learning has become a research interest of mine recently. However, one common gripe that I and many others have is the fact that RL doesn't seem to work well in the real world. Sure, it's great for games ([AlphaGo](https://deepmind.com/research/alphago/){:target="_ blank"}, [OpenAI Five](https://openai.com/five/){:target="_ blank"}) and sometimes robotics, but what good is a supposedly "general" framework like RL if it can't be applied to real-life problems that actually need solving? I was further puzzled by the fact that RL, despite being based on (and sometimes literally the same thing as) widely applied late 20th control theory, is not nearly as widely applied itself.
+
+As a result, I started researching examples of reinforcement learning applied in industry. The paper I'm covering in this post ([Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"}) is one of these rare examples. This paper isn't perfect: the end result tended to be a bit suspicious, the proofs were verbose at times. However, despite all that, I still think that this is a fantastic paper solely because it shows that RL **can** create economic value.
+
+# The Real-Time Bidding Process
+
+If you're one of the 5 people in the world who doesn't use Adblock, you'll tend to see visual ads that look like banners or images. We call these **display advertisements**. Each time a user sees an ad on a site (doesn't need to be unique), we call that an **impression**. In this post, we'll use the terms "ad" and "impression" interchangeably. Multiple impressions can be generated with a single page visit since web pages tend to have more than one ad slot.
+
+There are multiple ways that a website can charge companies for impressions. The most popular way is to auction out each impression in real time, in a process called **Real-Time Bidding (RTB)**.
+
+The process starts when a user reaches a webpage. While the page is loading, the following events happen in sequence:
+1. The website sends impression info (user cookie ID, location, time, domain, URL, etc.) to a central auction exchange in the form of a **bid request**
+2. Bots/agents from various companies receive this bid request and look at the info.
+3. Each bot decides on a bid price and submits it. Each bot also submits the ad that it wishes to broadcast, should it win the auction.
+4. The highest bidder gets their ad displayed on the webpage and pays a sum of money to the website. I'll focus on second-price auctions in this post, which means that the top bidder pays one cent above the second-highest bid regardless of how high the original top bid was. An alternative is first-price bidding, where the top bidder pays his original bid. I'm choosing this particular auction format because [Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"} focus on it, and because it's far more common than first-price auctions.
+
+Keep in mind that this process happens in the span of milliseconds, and repeats every time someone visits a page. To make this process clearer, here's a gif outlining the process for a hypothetical ad.
+
+![Alt Text](../assets/img/rlb/rtb_process.gif){:height="700px" width="2000px"}
+**Figure 1: RTB Process GIF**
+{: style="text-align: center"}
+
+The goal here is to design a bidding agent that maximizes some KPI under a budget constraint. There are various options for KPI, but we'll be using the most common one, which is the total number of clicks acquired.
+
+# Background and Prior Work
+
+The probability of a user clicking the ad after seeing it is called **click-through rate(CTR)**. In an ideal world, the cost of an impression would be:
+
+$$
+\text{CTR} \times \text{click value}
+$$
+
+Where click value is the average spend from a customer after clicking on an ad. This formula makes sense intuitively; the price of an ad is just the expected revenue from an impression. Finding the optimal bid price in this scenario is relatively straightforward. We would need to implement some supervised learning models to predict click value and CTR, and then submit their product as the bid price.
+
+Unfortunately, we live in the real world, where things aren't so simple. The optimal price of an ad depends on many other factors, such as **market competition**, **remaining auction volume**, and **remaining campaign budget**. To bid optimally, agents need to model these variables to some extent. In the past, people have tried to fit static distributions to these variables, and then maximize some metric (e.g., total clicks or revenue) using these distributions. This method tended to not work well in practice, since market competition is very dynamic, which makes it very hard to have accurate static models.
+
+## Past Bidding Agents
+
+After receiving a bid request, an agent needs to do three things:
+1. The agent first needs to estimate the *utility* of the impression (represented in this paper by CTR, but can use other metrics). This part is called the **utility estimation component**. The goal is to accurately predict how much benefit the company will receive from showing the ad, and is the most important decider of the bid price. For example, if an agent thinks that a particular user is unlikely to click on an ad from their company, then it'll bid lower, and vice versa.
+2. The agent also needs to forecast the *cost distribution* of the ad. This is the **bid landscape forecasting component** of the agent. A cost distribution is needed to find the win probability for a given bid on an impression. This win probability is needed to plan out future budgeting decisions.
+3. Given estimated utility, cost distribution, remaining budget, and remaining auction volume, the agent needs to decide on a final bid price for an impression. This is referred to as the **bid optimization component**. Past work on this particular component is pretty scarce, which is good since **this component is the main focus of this paper.**
+
+**Utility Estimation Component:**  
+The goal here is to estimate the probability of an event (e.g., user click) given ad and user info. This info is contained in what we refer to as the **feature vector** of an impression. As the name suggests, the feature vector contains features (or inputs) for our estimator. These probabilities are relatively stationary, which makes utility estimation a fairly typical supervised learning problem. Therefore, any old supervised learning model will do here.
+
+In practice, companies tend to use [logistic regression](http://wnzhang.net/share/rtb-papers/cvr-est.pdf){:target="_ blank"} or gradient boosted trees for this task. There are also cases of more niche models that perform weight updates automatically, such as [Bayesian probit regression](http://quinonero.net/Publications/AdPredictorICML2010-final.pdf){:target="_ blank"} or ["Follow the Regularized Leader" (FTRL) logistic regression](http://www.eecs.tufts.edu/~dsculley/papers/ad-click-prediction.pdf){:target="_ blank"}. Since utility estimation isn't the focus, the paper covered in this post ([Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"}) uses FTRL logistic regression to predict CTR.
+
+**Cost Estimation Component (a.k.a. Bid Landscape Forecasting):**  
+The bidding agent also needs to model the price distribution for each ad. This distribution is needed to find win probability, which is the c.d.f. of the distribution at some bid price. Unfortunately, this isn't a typical supervised learning problem like utility estimation.
+
+The main problem here is that the price is **censored** for most ads. Specifically, it's **right-censored**, which means that sometimes we don't know how the high the market price of a bid can be. This is because the agent can only observe the market price for an impression when it wins that auction. Of course, any one agent is likely to lose the vast majority of its auctions, so dealing with censored auction prices is essential.
+
+Of course, one could ignore the censored data and use only uncensored data to fit a distribution. For example, [this paper](http://wnzhang.net/share/rtb-papers/bid-lands.pdf){:target="_ blank"} uses gradient boosted trees to fit a log-normal price distribution. The problem with this approach is that actual uncensored data can be scarce, depending on the budget given to the agent. Furthermore, markets conditions are non-stationary, which makes it even more vital to use all the data available.
+
+One possible solution to this problem is to use [censored linear regression](https://dl.acm.org/citation.cfm?id=2783276){:target="_ blank"} to model likelihoods for both censored and observed prices. Bid landscape forecasting isn't the focus in ([Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"}), so the authors follow the method of a previous [paper](http://wnzhang.net/papers/unbias-kdd.pdf){:target="_ blank"}, which uses a Kaplan-Meier estimator to predict the market price distribution. This particular estimator comes from survival analysis and is well suited to right-censored data.
+
+**Bid Optimization Component:**  
+In industry, the most widely used method for bid price optimization is to use a [linear bidding function](https://dl.acm.org/citation.cfm?id=2339655){:target="_ blank"}, using predicted CTR as the input. It basically works like this:
+
+$$
+\text{bid}=b_0*\frac{\text {pred. current ad utility}}{\text {avg. historical utility over all ads}}
+$$
+
+Where $$b_0$$ is some multiplier that's fitted using past data. Pretty simple, right? It actually works surprisingly well. Other researchers have also proposed [non-linear bidding functions](https://arxiv.org/abs/1506.03837){:target="_ blank"} which are similar to the one above. However, both these methods don't play well with real-world non-stationary data, since they're static in nature.
+
+This brings us to the end of the literature review! The rest of this post  covers new stuff from [Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"}
+
+# Formulating the RTB problem as a Markov Decision Process
+
+The Real-Time Bidding (RTB) process was described earlier in general terms. I'll now dive into the details of what the agent needs to do.
+
+Consider an advertising campaign, where a company wants to allocate a certain budget over the next $$t$$ impressions. The agent's job would then be to maximize total clicks over the course of the campaign, given the limited budget and the limited number of impressions. It accomplishes this job by being fed a bunch of impressions in sequence and deciding how much to bid on each one. It uses three pieces of information as inputs:
+1. The number of ads remaining in the campaign
+2. The amount of remaining budget in the campaign
+3. The specific info for the ad (cookie ID, URL, etc.)
+
+That's the problem in a nutshell.
+
+To tackle the RTB problem with a reinforcement learning algo, we'll need to formulate this problem as a Markov Decision Process(MDP's). If you're new to MDP's, one place to learn about them is my [tutorial](http://www.johngao.com/blog/rl-intro-beginners-1.html){:target="_ blank"} post.
+
+There are 4 parts to our MDP formulation. These are:
+1. State
+2. Action
+3. State Transition
+4. Reward
+
+Some of you may be wondering why there's no discount factor, which is typically included in MDP formulations. This is because the time at which the agent receives clicks doesn't matter since we're trying to maximize total clicks over the course of a campaign. Therefore, we set the discount factor $$\gamma$$ to a constant value of 1.
+
+**State:**  
+Before we dive into each part of the MDP, we'll cover the relevant notation first.
+
+|       Notation      | Description                                                                                                                                 |
+|:-------------------:|---------------------------------------------------------------------------------------------------------------------------------------------|
+|        $$t$$        | A counter representing the number of impressions remaining in the campaign. Essentially a "time step". Also used to identify an impression. |
+|        $$T$$        | Total number of impressions in the campaign.                                                                                                |
+|        $$b$$        | The amount of remaining budget.                                                                                                             |
+|        $$B$$        | Total budget of a campaign at the beginning.                                                                                                |
+|     $$\pmb{x}$$     | A feature vector that contains info for a particular impression (e.g. cookie ID, URL, time of day, etc.).                                   |
+|    $$\pmb{x}_t$$    | The feature vector for a particular ad $$t$$.                                                                                               |
+|        $$s$$        | The state variable. $$s$$ is actually a 3-tuple of other variables.                                                                         |
+|     $$\pmb{S}$$     | The s of all possible states.                                                                                                               |
+| $$(t, b, \pmb{x})$$ | 3-tuple which is equivalent to $$s$$.                                                                                                       |
+
+**Table 1: MDP State Notation**
+{: style="text-align: center"}
+
+As you can see from the notation table, our state $$s \in \pmb S$$ is made up of a 3-tuple containing $$t$$, $$b$$, and $$\pmb x$$. These are the three pieces of info that the agent needs to process to decide on a bid price for each impression.
+
+The 'time step' $$t$$ tracks the number of impressions left in the campaign and is known as the **remaining ad volume**. The agent needs to know this so that it can decide to spend more liberally if there are few ads and a lot of budget, or vice versa. Many researchers wouldn't consider this a state, but instead treat it as a separate time step variable, so that they can express stuff like $$s_t$$, which refers to a state at a particular point in the campaign. I personally like to refer to $$t$$ as the 'stage'. However, treating $$t$$ as another state isn't wrong, so we'll stick with this interpretation to remain consistent with [Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"}.
+
+The budget variable $$b$$ tracks how much money the agent has left to spend in a campaign. One thing to note is that since the lowest monetary denominator is 1 cent, the budget variable is discrete. Therefore, $$b$$ is expressed in cents.
+
+The feature vector $$\pmb {x}_t$$ represents all of the user and ad info for a particular impression $$t$$. **The only purpose of this feature vector is to be used as inputs for the expected click-rate model**. In other words, it's only used for present utility estimation, and not for future planning like $$b$$ and $$t$$ are. 
+
+**Action:**  
+
+|             Notation            | Description                                         |
+|:-------------------------------:|-----------------------------------------------------|
+|    $$a_{(t, b, \pmb{x}_t)}$$    | The bid price chosen in a particular state.         |
+|             $$a_t$$             | Shorthand for $$a_{(t, b, \pmb{x}_t)}$$.            |
+|             $$a_s$$             | Also shorthand for $$a_{(t, b, \pmb{x}_t)}$$.       |
+| $$\pmb{A}_{(t, b, \pmb{x}_t)}$$ | The set of available actions in a particular state. |
+
+**Table 2: MDP Action Notation**
+{: style="text-align: center"}
+
+The action is pretty straightforward to define; it's how much the agent decides to bid for a particular impression. Like $$b$$, $$a_t$$ represents a monetary amount and is therefore discrete with intervals of 1 cent between each value. The lower bound for and $$a_t$$ is 0, but the higher bound is theoretically equal to the remaining budget $$b$$. However, we don't want the agent to spend ridiculous amounts like $20 for one impression, so we'll place a cap on the amount that the agent can spend on any one ad.
+
+**State Transitions:**
+
+|        Notation        | Description                                                                                                                                                                   |
+|:----------------------:|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+|   $$\mu (s, a, s')$$   | The probability of a state transitioning from some state $$s$$ to some state $$s'$$ given action $$a$$.                                                                       |
+|       $$\delta$$       | The market price, which is the second highest bid for an ad. Our agent wins an auction if $$a>\delta$$ for that ad.                                                           |
+|      $$m(\delta)$$     | The p.d.f. of the market price distribution $$\delta$$ for the average ad. The c.d.f. of the price distribution at bid price $$a=\delta$$ is the win probability of that bid. |
+| $$m(\delta, \pmb{x})$$ | The p.d.f. of the market price distribution $$\delta$$ for a certain ad. This is a more accurate version of $$m(\delta)$$.                                                    |
+
+**Table 3: MDP State Transition Notation**
+{: style="text-align: center"}
+
+We have three state variables, so let's look at each of their transitions.
+
+$$t$$ is the easy one since the number of ads remaining in a campaign always goes down by 1 each time we bid on an ad. Therefore:  
+
+$$
+t \rightarrow t-1
+$$
+
+$$b$$ is a bit more complex. Basically, when the agent makes a bid, it puts a certain amount $$a$$ of its remaining budget on the line. If it wins the auction ($$a>\delta$$) then the remaining budget will decrease by $$\delta$$, the agent needs to pay money to the seller. If the agent doesn't win ($$a<\delta)$$, then the budget doesn't change. The probability of winning is the area of $$m(\delta)$$ where $$\delta< a$$, which is:
+
+$$
+P(\text{win} \vert a)=\sum\nolimits_{\delta =0}^{a}m(\delta)
+$$
+
+This is the c.d.f. of the market price distribution at $$a$$.  
+Likewise, the probability of a loss is:
+
+$$
+P(\text{loss} \vert a)=1-\sum\nolimits_{\delta =0}^{a}m(\delta)=\sum\nolimits_{\delta =a+1}^{\infty}m(\delta)
+$$
+
+The state transition for $$b$$ is therefore:
+
+$$
+b \rightarrow
+\begin{cases}
+b-\delta & \text{with prob. $\sum\nolimits_{\delta =a+1}^{\infty}m(\delta)$ (win bid)} \\
+  b & \text{with prob. $\sum\nolimits_{\delta =0}^{a}m(\delta)$ (lose bid)} \\
+\end{cases}
+$$
+
+Estimating out the market price distribution is where the **bid landscape forecasting** component comes into play. This component isn't the focus of this post, so for now, treat it as a black box that spits out an estimated $$m(\delta)$$ which we then use in our bidding agent. If we have the feature vector for the ad, then we can get a more accurate distribution $$m(\delta, \pmb{x}$$), which replaces $$m(\delta)$$. If you want to know more about bid landscape forecasting, check out ([Zhang et al. 2016](http://wnzhang.net/papers/unbias-kdd.pdf){:target="_ blank"}).
+
+The transition for feature vector $$\pmb x$$ doesn't matter since it's not used for planning. In other words, we just throw out $$\pmb x$$ and get a new one with each impression.  
+
+If the agent is looking into the future (as the agent will need to do), then it won't have the feature vector for future ads. Here's the state transition in this scenario:
+
+$$
+(t, b) \rightarrow
+\begin{cases}
+(t-1, b-\delta) & \text{with prob. $\sum\nolimits_{\delta =a+1}^{\infty}m(\delta)$} \\
+  (t-1, b) & \text{with prob. $\sum\nolimits_{\delta =0}^{a}m(\delta)$} \\
+\end{cases}
+$$
+
+However, the agent will have the feature vector for the present ad. This feature can be used to augment the state transition for the current ad like so:
+
+$$
+(t, b) \rightarrow
+\begin{cases}
+(t-1, b-\delta) & \text{with prob. $\sum\nolimits_{\delta =a+1}^{\infty}m(\delta, \pmb{x})$} \\
+  (t-1, b) & \text{with prob. $\sum\nolimits_{\delta =0}^{a}m(\delta, \pmb{x})$} \\
+\end{cases}
+$$
+
+**Reward:**
+
+|         Notation        | Description                                                                                                 |
+|:-----------------------:|-------------------------------------------------------------------------------------------------------------|
+|      $$r(s,a,s')$$      | The reward when the agent transitions from some state $$s$$ to some state $$s'$$ given action $$a$$.        |
+|   $$\theta(\pmb{x})$$   | The predicted click probability(CTR) of an ad with feature vector $$\pmb x$$.                               |
+| $$\theta_{\text{avg}}$$ | The avg CTR over all impressions. Used as substitute for $$\theta(\pmb{x})$$ when we don't know $$\pmb x$$. |
+
+**Table 4: MDP Reward Notation**
+{: style="text-align: center"}
+
+The difficulty in designing good reward functions is a significant roadblock in making RL practical. Fortunately for our case, it's pretty straightforward!
+
+We know that we want the agent to maximize total clicks over a campaign. Therefore, our best bet is to give it some constant reward (such as 1) each time one of its ads receives a click. If an agent shows an ad that isn't clicked or doesn't win the auction for the ad, then it gets a reward of 0.
+
+The agent doesn't know the click probability, or CTR, of the impression that it's bidding on. However, it does have the ad's feature vector $$\pmb{x}$$. Using this feature vector, the agent can predict the CTR with the **utility estimation component**. The predicted CTR for the current impression is represented by $$\theta(\pmb{x})$$. Like the bid landscape forecasting component, please treat this component as a black box. Just know that the utility estimation component outputs an estimated click rate $$\theta(\pmb{x})$$ for each impression using that impression's feature vector $$\pmb x$$ (more details [here](http://wnzhang.net/share/rtb-papers/cvr-est.pdf){:target="_ blank"}).
+
+The agent also needs to predict future rewards for impressions that it hasn't observed in order to judge the utility of saving money for later. Unfortunately, since we can't predict future feature vectors, we also can't use the utility estimation component. Therefore, the agent just uses the historical average CTR $$\theta_{\text{avg}}$$ as a substitute for $$\theta (\pmb{x})$$ for future ads.
+
+## MDP Recap
+
+Just a quick recap of what we have to work with:  
+**State**: $$(t, b, \pmb{x})$$ - The remaining ad volume, budget, and feature vector
+**Action**: $$a_{(t, b, \pmb{x}_t)}$$ - The amount to bid for a particular impression  
+**State transition**:  
+$$
+(t, b) \rightarrow
+\begin{cases}
+(t-1, b-\delta) & \text{with prob. $\sum\nolimits_{\delta =a+1}^{\infty}m(\delta)$} \\
+  (t-1, b) & \text{with prob. $\sum\nolimits_{\delta =0}^{a}m(\delta)$} \\
+\end{cases}
+$$  
+or  
+$$
+(t, b) \rightarrow
+\begin{cases}
+(t-1, b-\delta) & \text{with prob. $\sum\nolimits_{\delta =a+1}^{\infty}m(\delta, \pmb{x})$} \\
+  (t-1, b) & \text{with prob. $\sum\nolimits_{\delta =0}^{a}m(\delta, \pmb{x})$} \\
+\end{cases}
+$$  
+**Reward**:  
+$$\theta(\pmb{x})$$ - The predicted CTR of an impression with feature vector $$\pmb x$$  
+or  
+$$\theta_{\text{avg}}$$ - The predicted CTR of any impression
+
+# Solving the RTB problem
+
+In this section, I'll go over the RL algorithm used to find optimal bid prices. I'll first cover the solution for small campaigns with fewer than 1000 ads ($$T<1000$$). Afterward, I'll cover the solutions for larger campaigns, which are based on the small-scale solution. Don't worry if the notation in the table below doesn't make sense; I'll go over each symbol in detail later.
+
+|        Notation       | Description                                                                                                                                        |
+|:---------------------:|----------------------------------------------------------------------------------------------------------------------------------------------------|
+|     $$V_{*}(t,b)$$    | The optimal value, which is the sum of future rewards from state $$(t,b)$$ assuming all actions are optimal.                                       |
+| $$a_{*}(t,b,\pmb x)$$ | The optimal action in state $$(t,b)$$ with feature vector $$\pmb x$$                                                                               |
+|     $$g(\delta)$$     | Equivalent to $$\Big(\theta(\pmb x)+V_{* }(t-1,b-\delta)-V_{* }(t-1,b)\Big)$$. Denoted $$g(\delta)$$ for convenience. This term is very important. |
+|       $$D(t,b)$$      | Equivalent to $$V_{* }(t,b+1)-V_{* }(t,b)$$. Also known as the minimum value differential. Used in large scale solution.                           |
+|      $$NN(t,b)$$      | The neural network approximation of $$D(t,b)$$.                                                                                                    |
+|        $$T_0$$        | Represents a sub-campaign of length $$T_0$$ formed by taking a subset of $$T$$                                                                     |
+|        $$B_0$$        | Represents a fraction of the main budget which is allocated to a sub-campaign                                                                      |
+
+**Table 5: MDP Solution Notation**
+{: style="text-align: center"}
+
+## Solving the Small Scale MDP (RLB)
+
+The authors in [Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"} use a version of dynamic programming called value iteration to solve the MDP. {:target="_ blank"}. This solution for small MDP's is referred to by the authors as **"Reinforcement Learning to Bid"**, or **RLB**.
+
+The first step to solving our MDP is to define the optimal value function. **The optimal value refers to the sum of future rewards starting from some state assuming all subsequent actions are optimal**. I know it seems a bit counterintuitive since it would seem that one needs to find optimal actions to find optimal value. Value iteration is confusing in this sense; I recommend reading Ch.4 of [Sutton and Bartok, 2017](http://incompleteideas.net/book/bookdraft2017nov5.pdf){:target="_ blank"} to get a better understanding if you aren't familiar with it.
+
+The optimal value function is defined like so:
+
+$$
+V_{* }(t,b) \approx \max\limits_{0 \leq a \leq b} \left\{ \sum\limits_{\delta =0}^{a}m(\delta)\Big(\theta_{\text{avg}}+V_{* }(t-1,b-\delta)\Big) + \sum\limits_{\delta =a+1}^{\infty}m(\delta)\Big(V_{* }(t-1,b)\Big) \right\}
+$$
+
+The first summation represents the consequences of winning an auction, which consists of the predicted reward for the impression plus the value of a future state where the budget is decreased by $$\delta$$. Likewise, the second summation describes the consequence of losing the current auction, which would yield no reward but also no decrease in budget. 
+
+Since the value function deals with future ads, **we can't use $$\pmb x$$ because we don't know it**. [Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"} marginalizes out $$\pmb x$$ in a long series of derivations that I won't cover here. The short version is that $$\theta(\pmb x)$$ is replaced with the historical average CTR $$\theta_{\text{avg}}$$, and $$m(\delta, \pmb{x})$$ is replaced with $$m(\delta)$$.
+
+The optimal action for each impression is the bid price which maximizes the value function:
+
+$$
+a_{* }(t,b,\pmb x) = \arg\max\limits_{0 \leq a \leq b} \left\{ \sum\limits_{\delta =0}^{a}m(\delta, \pmb{x})\Big(\theta(\pmb x)+V_{* }(t-1,b-\delta)\Big) + \sum\limits_{\delta =a+1}^{\infty}m(\delta, \pmb{x})\Big(V_{* }(t-1,b)\Big) \right\}
+$$
+
+As you can see, the optimal action formula is simply the argmax of the value function. There is one key change however: **we now have the feature vector** for the current ad. Consequently, we can use $$\theta(\pmb x)$$ instead of $$\theta_{\text{avg}}$$ in order to get a more accurate reward prediction. Likewise, we can use $$m(\delta, \pmb{x})$$ instead of $$m(\delta)$$.
+
+To simplify the action function, we know that:  
+
+$$
+\sum\limits_{\delta=0}^{\infty}m(\delta, \pmb{x}) = \sum\limits_{\delta=0}^{a}m(\delta, \pmb{x}) + \sum\limits_{\delta=a+1}^{\infty}m(\delta, \pmb{x}) = 1
+$$  
+
+Which means that:  
+
+$$
+\sum\limits_{\delta=a+1}^{\infty}m(\delta, \pmb{x}) = 1 - \sum\limits_{\delta=0}^{a}m(\delta, \pmb{x})
+$$
+
+Substituting into the action function:
+
+$$
+a_{* }(t,b,\pmb x) = \arg\max\limits_{0 \leq a \leq b} \left\{ \sum\limits_{\delta =0}^{a}m(\delta, \pmb{x})\Big(\theta(\pmb x)+V_{* }(t-1,b-\delta)\Big) + 1 - \sum\limits_{\delta=0}^{a}m(\delta, \pmb{x})\Big(V_{* }(t-1,b)\Big) \right\}
+$$
+
+Moreover, since this is an argmax function, we can remove constants.
+
+$$
+a_{* }(t,b,\pmb x) = \arg\max\limits_{0 \leq a \leq b} \left\{ \sum\limits_{\delta =0}^{a}m(\delta, \pmb{x})\Big(\theta(\pmb x)+V_{* }(t-1,b-\delta)\Big) - \sum\limits_{\delta=0}^{a}m(\delta, \pmb{x})\Big(V_{* }(t-1,b)\Big) \right\}
+$$
+
+Factoring:
+
+$$
+a_{* }(t,b,\pmb x) = \arg\max\limits_{0 \leq a \leq b} \left\{ \sum\limits_{\delta =0}^{a}m(\delta, \pmb{x})\Big(\theta(\pmb x)+V_{* }(t-1,b-\delta)-V_{* }(t-1,b)\Big) \right\}
+$$
+
+And that's all we need to find the optimal actions! **The most important part for understanding this intuitively is:**
+
+$$
+g(\delta)=\Big(\theta(\pmb x)+V_{* }(t-1,b-\delta)-V_{* }(t-1,b)\Big)
+$$
+
+We refer to it as $$g(\delta)$$ for convenience. This formula indicates if an auction is worth winning at a certain price. The first term is the predicted reward, and the second term is the value of the rest of the campaign if  $$\delta$$ is subtracted from the budget. The third, negative term is the value of the rest of the campaign if that same amount $$\delta$$ is saved rather than spent. If $$g(\delta)$$ is negative for a certain $$\delta$$, then the agent should not make the bid $$a=\delta$$.
+
+The agent still needs to decide on values for $$a$$ where $$g(\delta)$$ is positive. Higher values of $$g(\delta)$$ imply lower bids. Lower bids, in turn, results in lower winrate $$\sum\nolimits_{\delta =0}^{a}m(\delta, \pmb{x})$$. In other words, high $$g(\delta)$$ implies low winrate, and vice versa. Since the agent needs to maximize the product of these two terms, it needs to strike a balance between winrate($$\sum\nolimits_{\delta =0}^{a}m(\delta, \pmb{x})$$) and value ($$g(\delta)$$). After all, an extremely rewarding bid price isn't useful if there's no chance of winning the auction at that bid price.
+
+Here's a backup diagram to help you understand the algorithm better. Blue circles are states, red circles are actions, orange text represents reward, and black text represents state transitions.
+
+![Alt Text](../assets/img/rlb/rtb_backup.png){:height="1000px" width="1000px"}
+**Figure 2: Small-scale RLB backup diagram**
+{: style="text-align: center"}
+
+And here's the full algorithm [Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"}:
+
+![Alt Text](../assets/img/rlb/rlb_algo.png){:height="700px" width="700px"}
+
+As you can see, it finds all the value functions for every possible state first and then uses those value functions to arrive at an optimal bid price. Considering every possible state combination takes a lot of computing power, so this solution becomes pretty much infeasible with large campaign sizes like $$T>10000$$.
+
+## Solving the Large Scale MDP
+
+The main source of complexity for this Algorithm 1 is finding the optimal value functions. The complexity of this task is $$O(TB)$$, where $$T$$ is total campaign volume and $$B$$ is the starting budget. To remedy this, [Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"} proposed to fit a model to a small subset of a campaign ($$(t,b)\in \{0,...,T_0\}\times\{0,...,B_0\}$$) in order to approximate value functions for the full campaign data ($$(t,b)\in \{0,...,T\}\times\{0,...,B\}$$).
+
+In fact, we don't even need to approximate $$V_{* }(t,b)$$ directly. With $$g(\delta)$$, we're not concerned about the values functions themselves; we only care about the differential $$V_{* }(t-1,b-\delta)-V_{* }(t-1,b)$$. Here, we introduce a new differential function:
+
+$$
+D(t,b)=V_{* }(t,b+1)-V_{* }(t,b)
+$$
+
+Which represents the smallest value difference between two budget states (e.g. the value difference between a budget of $20.26 and $20.25). This works because we can substitute the value differential like so:
+
+$$
+V_{* }(t-1,b-\delta)-V_{* }(t-1,b)=-\sum\limits_{\delta ' =1}^{\delta}D(t-1, b-\delta ')
+$$
+
+This shows that the value differential $$V_{* }(t-1,b-\delta)-V_{* }(t-1,b)$$ is the negative sum of all the individual minimum increment differences. Therefore, all we need to do to estimate our value differential is to find how big the smallest increment $$D(t,b)$$ is for each bid price. To reiterate, $$D(t,b)$$ is our prediction target.
+
+[Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"} proposed 3 methods to predict $$D(t,b)$$.
+
+**Method 1: Straight neural nets (RLB-NN)**  
+One can treat predicting $$D(t,b)$$ as a supervised learning task like any other. [Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"} proves that $$D(t,b)$$ is nonlinear with respect to both $$t$$ and $$b$$, so they used a fully-connected neural network with several hidden layers to model it directly. The two input nodes are $$b$$ and $$t$$ values, and the output node is $$D(t,b)$$. The neural net is trained on known values of $$D(t,b)$$ from the smaller campaign subset $$(t,b)\in \{0,...,T_0\}\times\{0,...,B_0\}$$. The predicted $$D(t,b)$$ is denoted $$NN(t,b)$$. $$NN(t,b)$$ is then used in place of $$D(t,b)$$ to construct value functions for unseen campaign data. Honestly, any non-linear supervised learning model would probably work fine as well.
+
+The architecture used is a fully connected NN with 2 hidden layers, both of which have tanh activations. The first hidden layer has 30 nodes, and the second has 15 nodes. Dynamic programming is used to find the differentials $$D(t,b)$$ directly for a small campaign of $$T_0=10000$$. Then, the NN is trained on these known differentials and then used to predict future differentials. 
+
+**Method 2: Neural Nets + Coarse-to-fine Episode Segmentation (RLB-NN-Seg)**  
+An alternative to using NN's out of the box is to split the problem up into a series of smaller problems and deal with each of them in sequence. [Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"} propose evenly dividing the full campaign of length $$T$$ into smaller sub-campaigns. These sub-campaigns would each have length $$T_0$$. In addition, each sub-campaign gets a budget of $$B_r/N_r$$, where $$B_r$$ is the total remaining budget and $$N_r$$ is the remaining number of sub-campaigns.
+
+For example, the first sub-campaign would have a budget of $$B/N$$, where $$B$$ is the total budget and $$N$$ is the total number of sub-campaigns. The agent will either spend all of its sub-budget on sub-campaign 1 or have money remaining. If there's money left over, then the remaining cash gets evenly distributed over the subsequent sub-campaigns.
+
+We would choose these sub-campaigns to be of large enough size so that it's still impractical to calculate values directly. Making them too small would make it impossible for the agent to adapt to each segment. Afterward, all we need to do is apply method 1 to each sub-campaign independently. In essence, the only difference between methods 1 and 2 is that method 2 splits the campaign into smaller episodes.
+
+**Method 3: Neural Nets + Differential Mapping (RLB-NN-MapD)**  
+In method 1, the NN never observes high values of $$t$$ in the training data. This is because it's extremely expensive to calculate $$D(t,b)$$ explicitly for large $$t$$. However, the NN still has to predict $$D(t,b)$$ for high values of $$t$$, so we're hoping that the NN can generalize well, which is unlikely. To get around this, [Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"} propose mapping large values of $$t$$ to smaller values that the NN has seen before. This should improve prediction accuracy since we're doing some of the generalization work manually.
+
+Remember that the differential $$D(t,b)$$ refers to the change in value if the budget increases by 1. From this definition, we can deduce that $$D(t,b)$$ decreases w.r.t $$b$$, since having a large budget would mean that a single dollar difference doesn't matter as much. Similarly, $$D(t,b)$$ would increase w.r.t. $$t$$, since having a larger campaign means spreading out the same budget more thinly, which increases the value of each dollar. From this, we can conclude that these two variables don't affect value independently. Increasing $$t$$ is effectively decreasing $$b$$. What *really* matters for $$D(t,b)$$ arent the values of $$t$$ and $$b$$ themselves. Instead, it's the ratio $$\frac{b}{t}$$ that's important. We'll call this ratio the **"budget condition"**. 
+
+The differential mapping method starts by finding the all the $$D(t,b)$$ values for a sub-campaign of length $$T_0$$ and budget $$B_0$$. We want to keep this sub-campaign as large as possible for accuracy reasons while maintaining reasonable computation costs. Therefore, instead of calculating $$D(t,b)$$ explicitly for the sub-campaign we'll follow method 1 and use neural nets to approximate differentials. This yields us $$NN(t,b)$$ for $$t<T_0$$. We then implement this mapping:
+
+$$
+D(t,b) \rightarrow D(T_0, \frac{b}{t}\times T_0)
+$$
+
+This means that to extrapolate to the rest of the campaign of length $$T$$, we would predict $$D(T_0, \frac{b}{t}\times T_0)$$ for the rest of the $$t$$ values. Note that the NN doesn't need to make predictions for such high values of $$t>T_0$$ anymore; instead, it predicts on $$T_0$$, an input value that it's already seen in the training set.
+
+**Method 4: Neural Nets + Action Mapping (RLB-NN-MapA)**  
+This final method is pretty much the same as method 3, but now just mapping actions directly instead of mapping $$D(t,b)$$. Again, we first take a sub-campaign and use a neural net to predict $$D(t,b)$$ where $$t<T_0$$. We then use this to get $$a(t,b,\pmb x)$$ for the sub-campaign. To get $$a(t,b,\pmb x)$$ values for the rest of the campaign $$T_0< t<T$$, we can use the following mapping:
+
+$$
+a(t,b,\pmb x) \rightarrow a(T_0, \frac{b}{t} \times T_0, \pmb x)
+$$
+
+The intuitive logic here is pretty much the same as in method 3; if a future budget condition is similar to the current one, then the optimal action should also be similar.
+
+## RTB Solution Recap
+
+To summarize, if a campaign is short enough then it can be solved using dynamic programming (**RLB**). However, in general, campaigns are too big for dynamic programming to solve in a reasonable time. For these larger campaigns, we'll need to approximate some of the variables so that dynamic programming doesn't have to do all the work. There are four ways to do this:
+
+1. **RLB-NN:** Use neural nets to output an approximation of $$D(t,b)$$ given inputs $$t$$ and $$b$$. Output is denoted $$NN(t,b)$$. NN trained on known values of $$D(t,b)$$, which are found using dynamic programming on a small portion of the campaign. 
+2. **RLB-NN-Seg:** Divide a large campaign of length $$T$$ and budget $$B$$ into smaller sub-campaigns each with length $$T_0$$. Then, repeat **RLB-NN** for each sub campaign in sequence, starting the first campaign with budget $$\frac{B}{N}$$ where $$N$$ is the number of sub-campaigns. Remaining sub-campaigns get a budget of $$B/N$$ plus whatever budget is leftover from previous sub-campaigns.
+3. **RLB-NN-MapD:** Get $$NN(t,b)$$ for sub-campaign of length $$T_0$$. Then, instead of predicting $$D(t,b)$$ for $$t>T_0$$, map $$D(t,b)$$ to $$D(T_0, \frac{b}{t})$$ and get $$NN(T_0, \frac{b}{t}\times T_0)$$. Use $$NN(T_0, \frac{b}{t}\times T_0)$$ to substitute for $$NN(t, b)$$ where $$t>T_0$$ or $$b>B_0$$.
+4. **RLB-NN-MapA:** Get $$NN(t,b)$$ for sub-campaign of length $$T_0$$, and use it to get $$a(t,b,\pmb x)$$ for $$t<T_0$$ and $$b<B_0$$. Then, use $$a(T_0, \frac{b}{t}\times T_0, \pmb x)$$ to substitute for $$a(T_0, \frac{b}{t}\times T_0, \pmb x)$$ where $$t<T_0$$ or $$b<B_0$$.
+
+# Experiments and Results:
+
+Testing the above methods is a non-trivial problem, so in this section, I'll be going over how [Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"} tested and compared their strategies with other existing alternatives. They've made all their code freely available, and you can find it [here](https://github.com/han-cai/rlb-dp){:target="_ blank"}. All the bidding strategies share the same utility estimator and market landscape forecaster, which are both trained using the same training set.
+
+## Alternative Bidding Strategies
+
+The novel bidding strategies proposed in [Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"}: are compared with other, existing strategies:
+
+1. **SS-MDP:** This is essentially the same as the small-scale dynamic-programming-only solution (**RLB**), except it ignores feature vector $$\pmb x$$, and therefore doesn't attempt to predict the potential reward(CTR) of each auction. This was originally developed to work on keyword-based search advertising, where there are no individual feature vectors. Here, it serves as one of our baselines.
+2. **Mcpc:** This strategy works like this:  
+$$
+a_{Mcpc}(t,b,\pmb x)=CPC\times \theta(\pmb x)
+$$  
+The goal of this strategy is to emulate a cost-per-click purchasing model, which used to be the dominant ad purchasing model until RTB came into existence. The advertiser would set their desired average CPC, and bid on each ad the CPC amount multiplied by the probability of click. This strategy treats each auction as an independent event, rather than a sequence. It also doesn't take into account market conditions.
+3. **Lin:** Short for linear bidding strategy, **Lin** assumes that the optimal bid price is some linear function of the predicted click probability. The formula is the following:  
+$$
+a_{Lin}(t,b,\pmb x)=b_0\times \frac{\theta(\pmb x)}{\theta_{avg}}
+$$  
+Where $$b_0$$ is some parameter that's fitted using past data. $$b_0$$ captures budget condition from the training data, which means that **Lin** takes the budget into account implicitly. This method would bid more on ads that have a higher predicted CTR than average, and vice versa. While not as simple as **Mcpc**, **Lin** is still very simple and is the most widely used method in industry. **This is our primary baseline for assessing the effectiveness of the newer RL-based bidding strategies.**
+
+## Offline evaluation:
+
+[Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"} used two datasets to evaluate bidding strategies offline: the [iPinYou dataset](http://data.computational-advertising.org/){:target="_ blank"} and the YOYI dataset (the authors didn't link the YOYI dataset, but it's probably [this one](http://apex.sjtu.edu.cn/datasets/7){:target="_ blank"}).
+
+Methods are evaluated on the basis of total clicks, given a fixed campaign length and budget, using the datasets listed above. In the datasets, each row represents an auction request, containing the feature vector $$\pmb x$$ for that auction as well as its winning price. The dataset also contains information on whether or not each ad was clicked or not. While total clicks is the most critical metric, other metrics are also examined, like win rate, average cost/ad (CPM), and effective cost per click (eCPC).
+
+*aside*: I actually have a bit of a problem with using past click response, since we don't know which company won the bid. If a past auction wasn't won by our company, but we DO win it in an experimental run, then the fact that it was clicked may be irrelevant since the ad itself would've been much different.
+
+An experiment follows these steps:
+1. A campaign of length $$T$$ and budget $$B$$ is initialized. Initial state is $$(t=T, b=B)$$.
+2. One bid request feature vector $$\pmb x$$ is sent to the bidding agent.
+3. The bidding agent submits a bid price for that request
+4. The agent's bid request is compared with the actual known market price of that ad. If the agent outbids the market price, then it wins the auction, which results in a decreased budget and possibly a click. If the agent bids below the market price, then essentially nothing changes except the remaining ad volume, which decreases by 1.
+5. Repeat steps 2-4 until campaign ends ($$t=0$$). 
+
+This experiment is repeated multiple times with varying experimental parameters. These parameters are campaign length, starting budget, and data used. The campaign length determines the size of the dataset fed to each agent. The starting budgets are determined in terms of the sum of the market prices of every ad in a campaign. For example, a budget parameter of 1/2 will allow an agent to win half of the auctions in a campaign. Experiments will be run with various budget parameters ranging from 1/2 to 1/32. Finally, one can also change the data fed to each agent. Each campaign needs to be a chronologically consecutive chunk of auctions from the dataset, but that specific chunk can be different for each experiment.
+
+### Small-scale offline evaluation:
+
+The first test is to observe how well the **RLB** method works on a small scale. For these experiments, $$T$$ is set to values less than 1500.
+
+First, let's see how **RTB** does under various budget conditions:
+
+![Alt Text](../assets/img/rlb/small_budgets.png){:height="300px" width="600px"}
+**Figure 3: Small scale evaluation results for various budgets ([Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"})**
+{: style="text-align: center"}
+
+The top left graph is the most important one, and it shows that **RLB** does offer a bit of improvement over **Lin**. **Mcpc** does alright when given larger budgets, but does terribly with small budgets since it doesn't take budget condition into account, whereas **RLB** and **Lin** do. **SS-MDP** does terribly across the board despite taking budget into account, since it doesn't contain a utility estimation component. In terms of CPM and eCPC, **RLB** and **Lin** are basically the same, and while winrate does differ between the two methods, it isn't really a relevant metric. 
+
+For various campaign lengths, **RTB** also offers some improvement over **Lin**:
+
+![Alt Text](../assets/img/rlb/small_lengths.png){:height="300px" width="600px"}
+**Figure 4: Small scale evaluation results for various campaign lengths ([Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"})**
+{: style="text-align: center"}
+
+However, there aren't any noticeable patterns based on values of $$T$$. One mystery regarding figure 4 is how they achieved ~1700 clicks with a campaign of length 200. I probably just missed something in the paper, but it could be a plotting error.
+
+Finally, here are the overall results of **RLB** vs **Lin**:
+
+![Alt Text](../assets/img/rlb/small_results.png){:height="300px" width="600px"}
+**Table 6: Click improvement of RLB vs Lin for  T=1000 and various budgets ([Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"})**
+{: style="text-align: center"}
+
+In table 6, each row is a campaign of 1000 ads, and each column represents a different starting budget. RLB wins the vast majority of the time and performs especially well with small budgets. By the way, the YOYI row is a separate campaign, not an aggregate. We have to be wary of the fact that these could just be specific campaigns that happened to do extremely well, since these numbers definitely don't match up with the performances shown in figure 3. In fact, figure 3 never had **RLB** beating **Lin** by more than 10%, but table 6 shows this happening most of the time. Therefore, I'd take table 6 with a grain of salt, and focus more on the results shown in figure 3, which are still quite good.
+
+These tests show that the idea of bidding with reinforcement learning provides a consistent, if small, improvement on the industry standard when used in small campaigns. Now we just need to check if the results scale up to larger campaigns.
+
+### Large Scale Offline Evaluation:
+
+This is where we test our 4 large-scale methods: **RLB-NN**, **RLB-NN-Seg**, **RLB-NN-MapA**, and **RLB-NN-MapD**. 
+
+Altering $$T$$ didn't seem to affect results much in the small-scale test, so [Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"} decided not to alter it during large-scale testing, which seems fair. Large-scale tests will be done with campaign length $$T=100,000$$, which is apparently about the same as a medium-sized 10-minute campaign in the real world. 
+
+Here are the results of the online test:
+
+![Alt Text](../assets/img/rlb/large_results.png){:height="300px" width="600px"}
+**Figure 5: Large scale evaluation results for various budgets ([Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"})**
+{: style="text-align: center"}
+
+Like the small-scale example, our RLB methods thrive with smaller budgets. **RLB-NN** didn't seem to do too well, but **RLB-NN-Seg**, **RLB-NN-MapA**, and **RLB-NN-MapD** consistently beat **Lin**.
+
+## Online Evaluation:
+
+I'll gloss over the technical details of the online test, but essentially what they did was implement both **Lin** and **RLB** real time. The paper doesn't make it clear which RL method they test out online, but since they refer to it as **RLB** I'll assume that it's their small-scale algorithm. It's strange that they would only be testing their small-scale solution online, so I'll be sending an email to clarify. Hardware restrictions maybe?
+
+Anyways, the two bidding agents are given budgets, which are allocated to episodes. Each episode is a series of ads and contains a fraction of the budget. Each episode also has a max limit of $$T$$ ads. Episodes end when the budget is spent, or if it reaches the maximum volume $$T$$. Think of these episodes as small campaigns. Bid requests are received live over a 4-day period and sent randomly to either **RLB** or **Lin**. Here are the results over the 4-day testing period:
+
+![Alt Text](../assets/img/rlb/online_summary.png){:height="300px" width="600px"}
+**Figure 6: Summary of results for online test ([Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"})**
+{: style="text-align: center"}
+
+RLB did ridiculously well, achieving 40% gain over **Lin** for total clicks. This is a bit suspicious since none of the offline tests came anywhere close to such an astonishing result.
+
+![Alt Text](../assets/img/rlb/online_over_time.png){:height="300px" width="600px"}
+**Figure 7: Summary of results for online test ([Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"})**
+{: style="text-align: center"}
+
+Figure 7 shows that the gap between **RLB** and **Lin** increases steadily over time.
+
+# Conclusion and Final Thoughts
+
+[Cai et al., 2017](https://arxiv.org/abs/1701.02490){:target="_ blank"} present a novel method to optimize real-time bidding for display ads. It outperforms all SotA bidding strategies due to a combination of 3 factors:
+
+1. It treats auctions as sequential events, rather than independent events. This is much more representative of how campaigns work in the real world.
+2. It considers and tries to predict the market price for an ad in order to get the win probability. This helps it plan better.
+3. It considers the number of remaining ads in a campaign, which many other algorithms don't do.
+
+All in all, this paper was a cool and inspirational application of reinforcement techniques in a way that delivers direct value to the economy (unlike, for example, becoming a master Go player). What's even more interesting is that this paper makes use of dynamic programming, which is a rather classic RL technique discovered in the 50's. I think many people would've argued that this is an applied control theory paper rather than an RL paper had the authors not used deep learning to augment their dynamic programming solution. This is interesting to me since few papers nowadays contain applications of classical RL. Instead, most RL papers focus on more modern methods. 
+
+Speaking of such methods, the authors are looking into newer RL algos like Q-learning and policy gradient methods to combine utility estimation, bid landscape forecasting, and bid optimization into a unified optimization framework. It would be really cool if they can pull this off (and one of them may have with a recent [paper](https://arxiv.org/abs/1802.09756){:target="_ blank"}) which I haven't read yet.
+
+This paper wasn't without its faults though, as some of the experiment results seemed to contradict each other or seem implausible. I'll most likely be sending emails about these issues. However, the paper did get accepted to WSDM 2017, which had a really low acceptance rate of %16. Therefore, I probably just made an error and misread the paper somehow.
+
+Anyways, I heavily enjoyed writing this since it helped me solidify my understanding of the paper. I know this post was a bit of a slog, but if you actually read all the way to this point, then I'm eternally grateful to you!
+
+Cheers!
+
+*As always, if you notice any mistakes, have any feedback, or would just like to discuss this topic, send me a message at gaojohn23@gmail.com!*
+
+
+
+# References
+[1] Han Cai, Kan Ren, Weinan Zhang, Kleanthis Malialis, Jun Wang, Yong Yu, and Defeng Guo. 2017. [Real-time bidding by reinforcement learning in display advertising. ](https://arxiv.org/abs/1701.02490){:target="_ blank"}In Proceedings of the Tenth ACM International Conference on Web Search and Data Mining. ACM, 661–670.
+
+[2]K.-c. Lee, B. Orten, A. Dasdan, and W. Li. [Estimating conversion rate in display advertising from past performance data.](http://wnzhang.net/share/rtb-papers/cvr-est.pdf){:target="_ blank"} In KDD, 2012.
+
+[3] T. Graepel, J. Q. Candela, T. Borchert, and R. Herbrich. [Web-scale bayesian click-through rate prediction for sponsored search advertising in Microsoft’s Bing search engine. ](http://quinonero.net/Publications/AdPredictorICML2010-final.pdf){:target="_ blank"} In ICML, 2010.  
+
+[4] H. B. McMahan, G. Holt, D. Sculley, M. Young, D. Ebner, J. Grady, L. Nie, T. Phillips, E. Davydov, D. Golovin, et al. [Ad click prediction: a view from the trenches. ](http://www.eecs.tufts.edu/~dsculley/papers/ad-click-prediction.pdf){:target="_ blank"} In KDD, 2013.
+
+[5] Y. Cui, R. Zhang, W. Li, and J. Mao. [Bid landscape forecasting in online ad exchange marketplace. ](http://wnzhang.net/share/rtb-papers/bid-lands.pdf){:target="_ blank"} In KDD, 2011.
+
+[6] W. C.-H. Wu, M.-Y. Yeh, and M.-S. Chen. [Predicting winning price in real-time bidding with censored data. ](https://dl.acm.org/citation.cfm?id=2783276){:target="_ blank"} In KDD, 2015.
+
+[7] W. Zhang, T. Zhou, J. Wang, and J. Xu. [Bid-aware gradient descent for unbiased learning with censored data in display advertising. ](http://wnzhang.net/papers/unbias-kdd.pdf){:target="_ blank"} In KDD
+
+[8] C. Perlich, B. Dalessandro, R. Hook, O. Stitelman, T. Raeder, and F. Provost. [Bid optimizing and inventory scoring in targeted online advertising. ](https://dl.acm.org/citation.cfm?id=2339655){:target="_ blank"} In KDD, 2012.
+
+[9] W. Zhang and J. Wang. [Statistical arbitrage mining for display advertising. ](https://arxiv.org/abs/1506.03837){:target="_ blank"} In KDD, 2015.
+
+[10] J. Jin, C. Song, H. Li, K. Gai, J. Wang, and W. Zhang. [Real-Time Bidding with Multi-Agent Reinforcement Learning in Display Advertising ](https://arxiv.org/abs/1802.09756){:target="_ blank"} arXiv preprint arXiv:1802.09756.
