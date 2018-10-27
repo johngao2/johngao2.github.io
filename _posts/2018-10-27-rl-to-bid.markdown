@@ -546,7 +546,7 @@ Cheers!
 
 [6] W. C.-H. Wu, M.-Y. Yeh, and M.-S. Chen. [Predicting winning price in real-time bidding with censored data. ](https://dl.acm.org/citation.cfm?id=2783276){:target="_ blank"} In KDD, 2015.
 
-[7] W. Zhang, T. Zhou, J. Wang, and J. Xu. [Bid-aware gradient descent for unbiased learning with censored data in display advertising. ](http://wnzhang.net/papers/unbias-kdd.pdf){:target="_ blank"} In KDD
+[7] W. Zhang, T. Zhou, J. Wang, and J. Xu. [Bid-aware gradient descent for unbiased learning with censored data in display advertising. ](http://wnzhang.net/papers/unbias-kdd.pdf){:target="_ blank"} In KDD, 2016.
 
 [8] C. Perlich, B. Dalessandro, R. Hook, O. Stitelman, T. Raeder, and F. Provost. [Bid optimizing and inventory scoring in targeted online advertising. ](https://dl.acm.org/citation.cfm?id=2339655){:target="_ blank"} In KDD, 2012.
 
