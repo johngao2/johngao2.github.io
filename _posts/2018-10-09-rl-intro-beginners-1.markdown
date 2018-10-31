@@ -5,7 +5,7 @@ author: "John Gao"
 categories: blog
 tags: [RL]
 ---
-In this **relatively long** tutorial series, I'll go over some of the basic fundamental theory behind reinforcement learning (RL). I'll try to do it in a way that should be accessible to anyone with basic math knowledge; as such, **the technical difficulty of this series will be relatively low**. The focus will be on diving deeply into the RL problem framework and one specific RL technique, with particular emphasis on the intuition behind them. Breadth is not the focus here, but if you want a really comprehensive view of RL techniques then I highly recommend reading this [blog post](https://lilianweng.github.io/lil-log/2018/02/19/a-long-peek-into-reinforcement-learning.html#markov-decision-processes){:target="_ blank"}. I'm hoping to keep the math in this post as light as possible, and focus on visuals.
+In this **relatively long** tutorial series, I'll go over some of the basic fundamental theory behind reinforcement learning (RL). I'll try to do it in a way that should be accessible to anyone with basic math knowledge; as such, **the technical difficulty of this series will be relatively low**. The focus will be on diving deeply into the RL problem framework and one specific RL technique, with particular emphasis on the intuition behind them. Breadth is not the focus here, but if you want a really comprehensive view of RL techniques then I highly recommend reading this [other blog post](https://lilianweng.github.io/lil-log/2018/02/19/a-long-peek-into-reinforcement-learning.html#markov-decision-processes){:target="_ blank"}. I'm hoping to keep the math in this post as light as possible, and focus on visuals.
 
 * The generated Toc will be an ordered list
 {:toc}
